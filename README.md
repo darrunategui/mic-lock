@@ -10,10 +10,10 @@ macOS's Core Audio doesn't let you "pin" a default input device. When a new
 audio device registers an input stream — most commonly a Bluetooth headset
 connecting over HFP/HSP — Core Audio re-evaluates the system default input
 and generally switches to the newly connected device. There's no toggle in
-System Settings to prevent this: the "automatic switching" setting you may
-have seen only applies to Apple's own AirPods/Beats devices switching
-between your Apple devices via iCloud, not to third-party Bluetooth mics
-taking over the input on a single Mac.
+System Settings to prevent this: the only related "automatic switching"
+setting applies to Apple's own AirPods/Beats devices switching between your
+Apple devices via iCloud, not to third-party Bluetooth mics taking over the
+input on a single Mac.
 
 So if you use a standalone microphone but also carry Bluetooth headphones,
 every time you connect the headphones macOS quietly switches your input
@@ -72,7 +72,7 @@ system_profiler SPAudioDataType
 Then install, passing a distinctive substring of that name:
 
 ```sh
-git clone <this-repo-url>
+git clone https://github.com/darrunategui/mic-lock.git
 cd mic-lock
 ./install.sh "<substring of your input device's name>"
 ```
