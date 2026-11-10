@@ -111,8 +111,21 @@ cd mic-lock
 4. Loads it with `launchctl bootstrap`, so it starts immediately and again on every
    login
 
-Logs (each time it detects and corrects a drift) go to
-`~/Library/Logs/mic-lock.log`.
+## Logs
+
+mic-lock writes to the macOS unified log, so there's no log file to grow or
+clean up. macOS rotates the entries itself. It logs only when something
+happens: the target device is found or lost, a switch is reverted, a manual
+choice is respected, or something fails. To see what it's been doing:
+
+```sh
+/usr/bin/log show --predicate 'subsystem == "com.davidarrunategui.mic-lock"' --last 1d
+```
+
+Use the full path, because zsh has a builtin called `log`. To watch live,
+use `/usr/bin/log stream` with the same predicate. When you run
+`~/.local/bin/mic-lock "<name>"` directly in a terminal, messages are also
+printed there.
 
 ## Uninstall
 
@@ -120,14 +133,16 @@ Logs (each time it detects and corrects a drift) go to
 ./uninstall.sh
 ```
 
-Unloads and removes the LaunchAgent and deletes the installed binary.
+Unloads and removes the LaunchAgent and deletes the installed binary (and
+the log file left by older versions, if any).
 
 ## Notes
 
 - The name match is a case-insensitive substring, so partial names like
   `"blue yeti"` or `"scarlett"` work fine — you don't need the exact full
-  string macOS reports.
-- If the target device isn't currently connected, `mic-lock` just logs that
-  it has nothing to enforce and waits for it to reappear.
+  string macOS reports. The resolved device is logged, and if more than one
+  input device matches, a warning lists them all.
+- If the target device isn't currently connected, `mic-lock` logs that once
+  and waits for it to reappear.
 - To change the target device later, just re-run `./install.sh "<new
   name>"` — it reloads the LaunchAgent with the new argument.

@@ -1,5 +1,6 @@
 import CoreAudio
 import Foundation
+import os
 
 // mic-lock: keeps a specific audio input device pinned as the macOS
 // default input, re-asserting it whenever the device list or default
@@ -13,14 +14,23 @@ guard CommandLine.arguments.count > 1 else {
 }
 let targetNameFragment = CommandLine.arguments[1].lowercased()
 
-func log(_ message: String) {
-    let ts = ISO8601DateFormatter().string(from: Date())
-    FileHandle.standardError.write("[\(ts)] \(message)\n".data(using: .utf8)!)
+// Logs go to the macOS unified log (rotated by the system, nothing to clean
+// up). View them with (zsh has its own `log` builtin, hence the full path):
+//   /usr/bin/log show --predicate 'subsystem == "com.davidarrunategui.mic-lock"' --last 1d
+// When run from a terminal, messages are also echoed to stderr.
+let logger = Logger(subsystem: "com.davidarrunategui.mic-lock", category: "main")
+let echoToStderr = isatty(STDERR_FILENO) != 0
+
+func log(_ message: String, level: OSLogType = .default) {
+    logger.log(level: level, "\(message, privacy: .public)")
+    if echoToStderr {
+        FileHandle.standardError.write("\(message)\n".data(using: .utf8)!)
+    }
 }
 
 func checkStatus(_ status: OSStatus, _ context: String) -> Bool {
     if status != noErr {
-        log("\(context) failed: OSStatus \(status)")
+        log("\(context) failed: OSStatus \(status)", level: .error)
         return false
     }
     return true
@@ -148,6 +158,7 @@ var firstSeen: [AudioDeviceID: Date] = [:]  // when each input device appeared
 var lastSeenDefault: AudioDeviceID?         // default input at the previous check
 var manualChoice: AudioDeviceID?            // overrides the target while present
 var reportedTarget: AudioDeviceID?          // last target device we logged
+var hasReportedTarget = false
 
 func describe(_ id: AudioDeviceID) -> String {
     "\"\(deviceName(id) ?? "unknown(\(id))")\""
@@ -177,18 +188,22 @@ func enforce(attempt: Int = 0) {
     }
     let matches = targetMatches(among: inputs)
     let target = matches.first
-    if let target, target != reportedTarget {
-        log("target resolved to \(describe(target))")
-        if matches.count > 1 {
-            let names = matches.map(describe).joined(separator: ", ")
-            log("warning: \(matches.count) input devices match \"\(targetNameFragment)\" (\(names)); using the first — reinstall with a more specific name")
+    // Only log when the target appears, disappears or changes, not on every
+    // Core Audio event.
+    if !hasReportedTarget || target != reportedTarget {
+        if let target {
+            log("target resolved to \(describe(target))")
+            if matches.count > 1 {
+                let names = matches.map(describe).joined(separator: ", ")
+                log("warning: \(matches.count) input devices match \"\(targetNameFragment)\" (\(names)); using the first — reinstall with a more specific name", level: .error)
+            }
+        } else {
+            log("target device matching \"\(targetNameFragment)\" not currently present — waiting for it to connect")
         }
+        reportedTarget = target
+        hasReportedTarget = true
     }
-    reportedTarget = target
-    guard let desired = manualChoice ?? target else {
-        log("target device matching \"\(targetNameFragment)\" not currently present, nothing to enforce")
-        return
-    }
+    guard let desired = manualChoice ?? target else { return }
     guard current != desired else { return }
 
     if attempt == 0,
@@ -209,7 +224,7 @@ func enforce(attempt: Int = 0) {
     } else if attempt < retryDelays.count {
         log("default input is still \(describe(current)) after reset attempt \(attempt) — retrying")
     } else {
-        log("default input is still \(describe(current)) after \(attempt) reset attempts — giving up until the next device change")
+        log("default input is still \(describe(current)) after \(attempt) reset attempts — giving up until the next device change", level: .error)
         return
     }
     setDefaultInput(desired)

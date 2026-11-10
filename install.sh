@@ -12,10 +12,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
 LABEL="com.davidarrunategui.mic-lock"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-LOG="$HOME/Library/Logs/mic-lock.log"
 DOMAIN="gui/$(id -u)"
 
-mkdir -p "$BIN_DIR" "$(dirname "$PLIST")" "$(dirname "$LOG")"
+mkdir -p "$BIN_DIR" "$(dirname "$PLIST")"
 swiftc -O "$SCRIPT_DIR/mic-lock.swift" -o "$BIN_DIR/mic-lock" -framework CoreAudio
 echo "built $BIN_DIR/mic-lock"
 
@@ -39,10 +38,8 @@ plutil -insert ProgramArguments -string "$BIN_DIR/mic-lock" -append "$PLIST"
 plutil -insert ProgramArguments -string "$DEVICE_NAME" -append "$PLIST"
 plutil -insert RunAtLoad -bool YES "$PLIST"
 plutil -insert KeepAlive -bool YES "$PLIST"
-plutil -insert StandardOutPath -string "$LOG" "$PLIST"
-plutil -insert StandardErrorPath -string "$LOG" "$PLIST"
 plutil -lint -s "$PLIST"
 
 launchctl bootstrap "$DOMAIN" "$PLIST"
 echo "installed and started LaunchAgent $LABEL, watching for device matching \"$DEVICE_NAME\""
-echo "logs: $LOG"
+echo "logs: /usr/bin/log show --predicate 'subsystem == \"$LABEL\"' --last 1d"

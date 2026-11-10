@@ -7,4 +7,5 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 rm -f "$PLIST"
 rm -f "$HOME/.local/bin/mic-lock"
+rm -f "$HOME/Library/Logs/mic-lock.log"  # left by versions that logged to a file
 echo "uninstalled $LABEL"
