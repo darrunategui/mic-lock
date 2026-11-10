@@ -84,7 +84,7 @@ cd mic-lock
 2. Installs the binary to `~/.local/bin/mic-lock`
 3. Writes a LaunchAgent plist to
    `~/Library/LaunchAgents/com.davidarrunategui.mic-lock.plist`
-4. Loads it with `launchctl`, so it starts immediately and again on every
+4. Loads it with `launchctl bootstrap`, so it starts immediately and again on every
    login
 
 Logs (each time it detects and corrects a drift) go to
