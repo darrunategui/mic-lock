@@ -118,7 +118,8 @@ func setDefaultInput(_ id: AudioDeviceID) {
     )
 }
 
-var enforcing = false
+let debounceInterval: TimeInterval = 0.6
+var pendingEnforce: DispatchWorkItem?
 
 @MainActor
 func enforce() {
@@ -139,12 +140,12 @@ func enforce() {
 func scheduleEnforce() {
     // Debounce: device negotiation after a BT connect/disconnect can take
     // a moment to settle, and re-asserting mid-negotiation can be ignored.
-    if enforcing { return }
-    enforcing = true
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-        enforcing = false
-        enforce()
-    }
+    // Each new event restarts the timer, so we act only once the burst of
+    // notifications has gone quiet for `debounceInterval`.
+    pendingEnforce?.cancel()
+    let work = DispatchWorkItem { enforce() }
+    pendingEnforce = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + debounceInterval, execute: work)
 }
 
 var devicesAddress = AudioObjectPropertyAddress(

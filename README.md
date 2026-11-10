@@ -45,8 +45,9 @@ object:
 - `kAudioHardwarePropertyDefaultInputDevice` (the default input changed for
   any reason)
 
-On either event, after a 0.6s debounce (to let Bluetooth device negotiation
-settle instead of fighting it mid-handshake), it looks up the current
+On either event, after a 0.6s debounce (restarted by each new event, to let
+Bluetooth device negotiation settle instead of fighting it mid-handshake),
+it looks up the current
 default input. If it doesn't match the target device (matched by a
 case-insensitive substring of its name) and the target device is currently
 present, it resets the default input back to the target.
