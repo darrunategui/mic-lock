@@ -64,13 +64,12 @@ func deviceName(_ id: AudioDeviceID) -> String? {
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain
     )
-    var name: CFString = "" as CFString
-    var dataSize = UInt32(MemoryLayout<CFString>.size)
-    let status = withUnsafeMutablePointer(to: &name) { ptr -> OSStatus in
-        AudioObjectGetPropertyData(id, &address, 0, nil, &dataSize, ptr)
-    }
-    guard status == noErr else { return nil }
-    return name as String
+    // The HAL returns a +1 retained CFString; take ownership explicitly.
+    var name: Unmanaged<CFString>?
+    var dataSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+    let status = AudioObjectGetPropertyData(id, &address, 0, nil, &dataSize, &name)
+    guard status == noErr, let name else { return nil }
+    return name.takeRetainedValue() as String
 }
 
 func deviceHasInputStreams(_ id: AudioDeviceID) -> Bool {
@@ -83,12 +82,17 @@ func deviceHasInputStreams(_ id: AudioDeviceID) -> Bool {
     guard AudioObjectGetPropertyDataSize(id, &address, 0, nil, &dataSize) == noErr, dataSize > 0 else {
         return false
     }
-    let bufferListPtr = UnsafeMutablePointer<AudioBufferList>.allocate(capacity: Int(dataSize))
-    defer { bufferListPtr.deallocate() }
-    guard AudioObjectGetPropertyData(id, &address, 0, nil, &dataSize, bufferListPtr) == noErr else {
+    // dataSize is in bytes (a variable-length AudioBufferList), so allocate
+    // raw bytes rather than `dataSize` whole AudioBufferList structs.
+    let raw = UnsafeMutableRawPointer.allocate(
+        byteCount: Int(dataSize),
+        alignment: MemoryLayout<AudioBufferList>.alignment
+    )
+    defer { raw.deallocate() }
+    guard AudioObjectGetPropertyData(id, &address, 0, nil, &dataSize, raw) == noErr else {
         return false
     }
-    let bufferList = UnsafeMutableAudioBufferListPointer(bufferListPtr)
+    let bufferList = UnsafeMutableAudioBufferListPointer(raw.assumingMemoryBound(to: AudioBufferList.self))
     return bufferList.contains { $0.mNumberChannels > 0 }
 }
 
