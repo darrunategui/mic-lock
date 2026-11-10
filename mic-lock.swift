@@ -86,8 +86,8 @@ func inputDeviceIDs() -> [AudioDeviceID] {
     allDeviceIDs().filter(deviceHasInputStreams)
 }
 
-func findTargetDevice(among inputs: [AudioDeviceID]) -> AudioDeviceID? {
-    inputs.first { deviceName($0)?.lowercased().contains(targetNameFragment) ?? false }
+func targetMatches(among inputs: [AudioDeviceID]) -> [AudioDeviceID] {
+    inputs.filter { deviceName($0)?.lowercased().contains(targetNameFragment) ?? false }
 }
 
 func currentDefaultInput() -> AudioDeviceID {
@@ -144,6 +144,7 @@ let autoSwitchWindow: TimeInterval = 10
 var firstSeen: [AudioDeviceID: Date] = [:]  // when each input device appeared
 var lastSeenDefault: AudioDeviceID?         // default input at the previous check
 var manualChoice: AudioDeviceID?            // overrides the target while present
+var reportedTarget: AudioDeviceID?          // last target device we logged
 
 func describe(_ id: AudioDeviceID) -> String {
     "\"\(deviceName(id) ?? "unknown(\(id))")\""
@@ -168,7 +169,16 @@ func enforce(attempt: Int = 0) {
         log("manually chosen input disconnected — reverting to target")
         manualChoice = nil
     }
-    let target = findTargetDevice(among: inputs)
+    let matches = targetMatches(among: inputs)
+    let target = matches.first
+    if let target, target != reportedTarget {
+        log("target resolved to \(describe(target))")
+        if matches.count > 1 {
+            let names = matches.map(describe).joined(separator: ", ")
+            log("warning: \(matches.count) input devices match \"\(targetNameFragment)\" (\(names)); using the first — reinstall with a more specific name")
+        }
+    }
+    reportedTarget = target
     guard let desired = manualChoice ?? target else {
         log("target device matching \"\(targetNameFragment)\" not currently present, nothing to enforce")
         return
