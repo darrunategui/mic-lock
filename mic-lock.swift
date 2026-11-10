@@ -90,15 +90,18 @@ func targetMatches(among inputs: [AudioDeviceID]) -> [AudioDeviceID] {
     inputs.filter { deviceName($0)?.lowercased().contains(targetNameFragment) ?? false }
 }
 
-func currentDefaultInput() -> AudioDeviceID {
+func currentDefaultInput() -> AudioDeviceID? {
     var address = AudioObjectPropertyAddress(
         mSelector: kAudioHardwarePropertyDefaultInputDevice,
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain
     )
-    var deviceID: AudioDeviceID = 0
+    var deviceID = AudioDeviceID(kAudioObjectUnknown)
     var dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
-    _ = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize, &deviceID)
+    guard checkStatus(
+        AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize, &deviceID),
+        "get default input device"
+    ), deviceID != kAudioObjectUnknown else { return nil }
     return deviceID
 }
 
@@ -161,7 +164,10 @@ func enforce(attempt: Int = 0) {
     for id in inputs where firstSeen[id] == nil { firstSeen[id] = now }
     firstSeen = firstSeen.filter { present.contains($0.key) }
 
-    let current = currentDefaultInput()
+    // If the default can't be read, don't act on a guess (and don't record
+    // it as the last-seen default, which the manual-override check relies on).
+    // The next Core Audio event will try again.
+    guard let current = currentDefaultInput() else { return }
     let previous = lastSeenDefault
     lastSeenDefault = current
 
