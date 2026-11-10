@@ -121,19 +121,40 @@ func setDefaultInput(_ id: AudioDeviceID) {
 let debounceInterval: TimeInterval = 0.6
 var pendingEnforce: DispatchWorkItem?
 
+// Core Audio can accept a default-device change (noErr) and then ignore it,
+// e.g. while a Bluetooth device is still negotiating. After each reset we
+// re-check after these delays and try again, then give up until the next
+// Core Audio event.
+let retryDelays: [TimeInterval] = [0.5, 1.0, 2.0]
+var pendingRetry: DispatchWorkItem?
+
 @MainActor
-func enforce() {
+func enforce(attempt: Int = 0) {
+    pendingRetry?.cancel()
+    pendingRetry = nil
+
     guard let target = findTargetDevice() else {
         log("target device matching \"\(targetNameFragment)\" not currently present, nothing to enforce")
         return
     }
     let current = currentDefaultInput()
-    if current != target {
-        let currentName = deviceName(current) ?? "unknown(\(current))"
-        let targetName = deviceName(target) ?? "unknown(\(target))"
+    guard current != target else { return }
+
+    let currentName = deviceName(current) ?? "unknown(\(current))"
+    let targetName = deviceName(target) ?? "unknown(\(target))"
+    if attempt == 0 {
         log("default input is \"\(currentName)\", expected \"\(targetName)\" — resetting")
-        setDefaultInput(target)
+    } else if attempt < retryDelays.count {
+        log("default input is still \"\(currentName)\" after reset attempt \(attempt) — retrying")
+    } else {
+        log("default input is still \"\(currentName)\" after \(attempt) reset attempts — giving up until the next device change")
+        return
     }
+    setDefaultInput(target)
+
+    let retry = DispatchWorkItem { enforce(attempt: attempt + 1) }
+    pendingRetry = retry
+    DispatchQueue.main.asyncAfter(deadline: .now() + retryDelays[attempt], execute: retry)
 }
 
 @MainActor
