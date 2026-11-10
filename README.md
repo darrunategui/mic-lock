@@ -47,10 +47,34 @@ object:
 
 On either event, after a 0.6s debounce (restarted by each new event, to let
 Bluetooth device negotiation settle instead of fighting it mid-handshake),
-it looks up the current
-default input. If it doesn't match the target device (matched by a
-case-insensitive substring of its name) and the target device is currently
-present, it resets the default input back to the target.
+it looks up the current default input. If it doesn't match the target device
+(matched by a case-insensitive substring of its name) and the target device
+is currently present, it resets the default input back to the target. It
+then re-checks after 0.5s, 1s and 2s and re-applies the change if Core Audio
+ignored it.
+
+### Manual override
+
+mic-lock only blocks *automatic* switches. If you pick a different input
+yourself in System Settings or Control Center, it respects that choice.
+
+It tells the two apart by what the new default input is. macOS
+auto-switches to a device that has *just appeared*, like a headset
+connecting. A manual pick selects a device that was already there. So a
+change counts as manual when the newly selected device has been connected
+for at least 10 seconds and the previous input is still present. If the
+previous input is gone, macOS is just falling back, and that doesn't count.
+
+A manual choice becomes the new pinned input. It is defended against later
+auto-switches, for example a second headset connecting, until:
+
+- you pick the target device again (the lock resumes), or
+- the chosen device disconnects (mic-lock goes back to the target), or
+- mic-lock restarts (e.g. at your next login).
+
+One edge case: picking a headset in the first 10 seconds after it connects
+looks the same as an auto-switch, so it gets reverted. Wait a moment and
+pick it again.
 
 It runs as a `launchd` LaunchAgent — no menu bar icon, no polling loop,
 just an event-driven background process that starts at login and restarts

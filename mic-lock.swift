@@ -82,14 +82,12 @@ func deviceHasInputStreams(_ id: AudioDeviceID) -> Bool {
     return bufferList.contains { $0.mNumberChannels > 0 }
 }
 
-func findTargetDevice() -> AudioDeviceID? {
-    for id in allDeviceIDs() {
-        guard deviceHasInputStreams(id), let name = deviceName(id) else { continue }
-        if name.lowercased().contains(targetNameFragment) {
-            return id
-        }
-    }
-    return nil
+func inputDeviceIDs() -> [AudioDeviceID] {
+    allDeviceIDs().filter(deviceHasInputStreams)
+}
+
+func findTargetDevice(among inputs: [AudioDeviceID]) -> AudioDeviceID? {
+    inputs.first { deviceName($0)?.lowercased().contains(targetNameFragment) ?? false }
 }
 
 func currentDefaultInput() -> AudioDeviceID {
@@ -128,29 +126,77 @@ var pendingEnforce: DispatchWorkItem?
 let retryDelays: [TimeInterval] = [0.5, 1.0, 2.0]
 var pendingRetry: DispatchWorkItem?
 
+// Manual override
+// ---------------
+// macOS auto-switches the default input to a device that has just appeared
+// (e.g. a Bluetooth headset connecting). A person picking an input in System
+// Settings or Control Center instead selects a device that was already
+// there. So a change of default input is treated as a manual choice when:
+//   - the newly selected device has been present for at least
+//     `autoSwitchWindow` (it isn't a fresh arrival), and
+//   - the previously selected device is still present (otherwise macOS is
+//     just falling back because the old default disappeared).
+// A manual choice is then held (and defended against later auto-switches)
+// until it disconnects, the person picks the target again, or mic-lock
+// restarts.
+let autoSwitchWindow: TimeInterval = 10
+
+var firstSeen: [AudioDeviceID: Date] = [:]  // when each input device appeared
+var lastSeenDefault: AudioDeviceID?         // default input at the previous check
+var manualChoice: AudioDeviceID?            // overrides the target while present
+
+func describe(_ id: AudioDeviceID) -> String {
+    "\"\(deviceName(id) ?? "unknown(\(id))")\""
+}
+
 @MainActor
 func enforce(attempt: Int = 0) {
     pendingRetry?.cancel()
     pendingRetry = nil
 
-    guard let target = findTargetDevice() else {
+    let now = Date()
+    let inputs = inputDeviceIDs()
+    let present = Set(inputs)
+    for id in inputs where firstSeen[id] == nil { firstSeen[id] = now }
+    firstSeen = firstSeen.filter { present.contains($0.key) }
+
+    let current = currentDefaultInput()
+    let previous = lastSeenDefault
+    lastSeenDefault = current
+
+    if let choice = manualChoice, !present.contains(choice) {
+        log("manually chosen input disconnected — reverting to target")
+        manualChoice = nil
+    }
+    let target = findTargetDevice(among: inputs)
+    guard let desired = manualChoice ?? target else {
         log("target device matching \"\(targetNameFragment)\" not currently present, nothing to enforce")
         return
     }
-    let current = currentDefaultInput()
-    guard current != target else { return }
+    guard current != desired else { return }
 
-    let currentName = deviceName(current) ?? "unknown(\(current))"
-    let targetName = deviceName(target) ?? "unknown(\(target))"
-    if attempt == 0 {
-        log("default input is \"\(currentName)\", expected \"\(targetName)\" — resetting")
-    } else if attempt < retryDelays.count {
-        log("default input is still \"\(currentName)\" after reset attempt \(attempt) — retrying")
-    } else {
-        log("default input is still \"\(currentName)\" after \(attempt) reset attempts — giving up until the next device change")
+    if attempt == 0,
+       let previous, previous != current, present.contains(previous),
+       let arrived = firstSeen[current], now.timeIntervalSince(arrived) >= autoSwitchWindow {
+        if current == target {
+            log("target \(describe(current)) manually reselected — resuming lock")
+            manualChoice = nil
+        } else {
+            log("default input manually changed to \(describe(current)) — respecting it until it disconnects or the target is reselected")
+            manualChoice = current
+        }
         return
     }
-    setDefaultInput(target)
+
+    if attempt == 0 {
+        log("default input is \(describe(current)), expected \(describe(desired)) — resetting")
+    } else if attempt < retryDelays.count {
+        log("default input is still \(describe(current)) after reset attempt \(attempt) — retrying")
+    } else {
+        log("default input is still \(describe(current)) after \(attempt) reset attempts — giving up until the next device change")
+        return
+    }
+    setDefaultInput(desired)
 
     let retry = DispatchWorkItem { enforce(attempt: attempt + 1) }
     pendingRetry = retry
@@ -196,6 +242,10 @@ _ = checkStatus(
 )
 
 log("mic-lock started, watching for input device \"\(targetNameFragment)\"")
-MainActor.assumeIsolated { enforce() }
+MainActor.assumeIsolated {
+    // Devices present at startup are not fresh arrivals.
+    for id in inputDeviceIDs() { firstSeen[id] = .distantPast }
+    enforce()
+}
 
 RunLoop.main.run()
