@@ -120,6 +120,7 @@ func setDefaultInput(_ id: AudioDeviceID) {
 
 var enforcing = false
 
+@MainActor
 func enforce() {
     guard let target = findTargetDevice() else {
         log("target device matching \"\(targetNameFragment)\" not currently present, nothing to enforce")
@@ -134,6 +135,7 @@ func enforce() {
     }
 }
 
+@MainActor
 func scheduleEnforce() {
     // Debounce: device negotiation after a BT connect/disconnect can take
     // a moment to settle, and re-asserting mid-negotiation can be ignored.
@@ -144,8 +146,6 @@ func scheduleEnforce() {
         enforce()
     }
 }
-
-let listenerQueue = DispatchQueue(label: "mic-lock.listener")
 
 var devicesAddress = AudioObjectPropertyAddress(
     mSelector: kAudioHardwarePropertyDevices,
@@ -158,20 +158,22 @@ var defaultInputAddress = AudioObjectPropertyAddress(
     mElement: kAudioObjectPropertyElementMain
 )
 
+// Listeners are delivered on the main queue so all state (e.g. the debounce
+// flag) is only ever touched from one thread.
 let listenerBlock: AudioObjectPropertyListenerBlock = { _, _ in
-    scheduleEnforce()
+    MainActor.assumeIsolated { scheduleEnforce() }
 }
 
 _ = checkStatus(
-    AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &devicesAddress, listenerQueue, listenerBlock),
+    AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &devicesAddress, DispatchQueue.main, listenerBlock),
     "add devices listener"
 )
 _ = checkStatus(
-    AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &defaultInputAddress, listenerQueue, listenerBlock),
+    AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &defaultInputAddress, DispatchQueue.main, listenerBlock),
     "add default-input listener"
 )
 
 log("mic-lock started, watching for input device \"\(targetNameFragment)\"")
-enforce()
+MainActor.assumeIsolated { enforce() }
 
 RunLoop.main.run()
